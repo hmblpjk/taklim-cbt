@@ -4,24 +4,22 @@ import { Question, ExamResult, EXAM_CATEGORIES } from "./constants";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const hasSupabase = Boolean(supabaseUrl && supabaseKey);
+const hasSupabase = Boolean(
+  supabaseUrl && 
+  supabaseKey && 
+  !supabaseUrl.includes("your-project-id") && 
+  !supabaseKey.includes("your_supabase")
+);
 
 export const supabase = hasSupabase
   ? createClient(supabaseUrl!, supabaseKey!)
   : null;
 
-// Local Memory Database Fallback for Published Questions, Results, & Dynamic Exam Token
 class LocalDatabase {
-  // Questions mapped by kategori (e.g. "afkar" -> Question[], "quran" -> Question[])
   private questionsMap: Record<string, Question[]> = {};
-  // Answer keys mapped by kategori -> (qId -> key)
   private answerKeysMap: Record<string, Record<string, "A" | "B" | "C" | "D">> = {};
   private results: ExamResult[] = [];
-
-  // Currently Active Category controlled by Admin (e.g. "afkar" on Day 1, "quran" on Day 2, or "none")
   private activeCategory: string = "afkar";
-
-  // Dynamic Exam Token configurable from Admin Panel
   private examToken: string = process.env.NEXT_PUBLIC_EXAM_TOKEN || "TAKLIM2026";
 
   constructor() {
@@ -81,13 +79,75 @@ class LocalDatabase {
       },
     ];
 
-    // Build answer key maps
+    this.rebuildAnswerKeys();
+    this.syncFromSupabase();
+  }
+
+  private rebuildAnswerKeys() {
     Object.keys(this.questionsMap).forEach((cat) => {
       this.answerKeysMap[cat] = {};
-      this.questionsMap[cat].forEach((q) => {
+      (this.questionsMap[cat] || []).forEach((q) => {
         if (q.answerKey) this.answerKeysMap[cat][q.id.toString()] = q.answerKey;
       });
     });
+  }
+
+  // Load existing questions and results from Supabase PostgreSQL if connected
+  async syncFromSupabase() {
+    if (!supabase) return;
+    try {
+      // 1. Fetch questions from Supabase
+      const { data: dbQuestions, error: qErr } = await supabase
+        .from("exam_questions")
+        .select("*");
+
+      if (!qErr && dbQuestions && dbQuestions.length > 0) {
+        const newMap: Record<string, Question[]> = { afkar: [], quran: [] };
+        dbQuestions.forEach((row: any) => {
+          const cat = row.category_id || "afkar";
+          if (!newMap[cat]) newMap[cat] = [];
+          newMap[cat].push({
+            id: row.question_number,
+            question: row.question_text,
+            options: row.options,
+            answerKey: row.answer_key,
+            kategori: cat,
+          });
+        });
+
+        Object.keys(newMap).forEach((cat) => {
+          if (newMap[cat].length > 0) {
+            newMap[cat].sort((a, b) => a.id - b.id);
+            this.questionsMap[cat] = newMap[cat];
+          }
+        });
+        this.rebuildAnswerKeys();
+      }
+
+      // 2. Fetch results from Supabase
+      const { data: dbResults, error: rErr } = await supabase
+        .from("exam_results")
+        .select("*");
+
+      if (!rErr && dbResults && dbResults.length > 0) {
+        this.results = dbResults.map((row: any) => ({
+          nim: row.nim,
+          nama: row.nama,
+          mabna: row.mabna,
+          kategori: row.kategori,
+          kategoriName: row.kategori_name,
+          score: row.score,
+          totalQuestions: row.total_questions,
+          percentage: row.percentage,
+          tabSwitches: row.tab_switches || 0,
+          durationSeconds: row.duration_seconds || 0,
+          submittedAt: row.submitted_at,
+          answers: row.answers || {},
+        }));
+      }
+    } catch (e) {
+      console.warn("Supabase sync warning:", e);
+    }
   }
 
   getExamToken(): string {
@@ -130,19 +190,60 @@ class LocalDatabase {
   }
 
   saveQuestions(kategori: string, newQuestions: Question[]) {
-    this.questionsMap[kategori] = newQuestions.map((q) => ({
+    this.questionsMap[kategori] = newQuestions.map((q, idx) => ({
       ...q,
+      id: q.id || idx + 1,
       kategori,
     }));
 
-    this.answerKeysMap[kategori] = {};
-    newQuestions.forEach((q) => {
-      if (q.answerKey) this.answerKeysMap[kategori][q.id.toString()] = q.answerKey;
-    });
+    this.rebuildAnswerKeys();
+
+    // Persist to Supabase if connected
+    if (supabase) {
+      const rows = newQuestions.map((q, idx) => ({
+        category_id: kategori,
+        question_number: q.id || idx + 1,
+        question_text: q.question,
+        options: q.options,
+        answer_key: q.answerKey || "A",
+      }));
+
+      supabase
+        .from("exam_questions")
+        .upsert(rows, { onConflict: "category_id,question_number" })
+        .then(({ error }) => {
+          if (error) console.error("Gagal simpan soal ke Supabase:", error);
+        });
+    }
   }
 
   saveResults(newResults: ExamResult[]) {
     this.results = [...this.results, ...newResults];
+
+    // Persist to Supabase if connected
+    if (supabase) {
+      const rows = newResults.map((r) => ({
+        nim: r.nim,
+        nama: r.nama,
+        mabna: r.mabna,
+        kategori: r.kategori,
+        kategori_name: r.kategoriName,
+        score: r.score,
+        total_questions: r.totalQuestions,
+        percentage: r.percentage,
+        tab_switches: r.tabSwitches || 0,
+        duration_seconds: r.durationSeconds || 0,
+        answers: r.answers || {},
+        submitted_at: r.submittedAt || new Date().toISOString(),
+      }));
+
+      supabase
+        .from("exam_results")
+        .upsert(rows, { onConflict: "nim,kategori" })
+        .then(({ error }) => {
+          if (error) console.error("Gagal simpan hasil ke Supabase:", error);
+        });
+    }
   }
 
   getResults(kategoriFilter?: string): ExamResult[] {
