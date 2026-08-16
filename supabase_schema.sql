@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS exam_results (
   UNIQUE(nim, kategori)
 );
 
+-- Disable Row Level Security (RLS) so API queries can insert/select without RLS blocks
+ALTER TABLE exam_questions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE exam_results DISABLE ROW LEVEL SECURITY;
+
 -- Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_exam_results_kategori ON exam_results(kategori);
 CREATE INDEX IF NOT EXISTS idx_exam_results_nim ON exam_results(nim);

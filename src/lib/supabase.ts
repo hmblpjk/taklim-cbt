@@ -1,19 +1,28 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { Question, ExamResult, EXAM_CATEGORIES } from "./constants";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+export const getSupabase = (): SupabaseClient | null => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_KEY;
 
-const hasSupabase = Boolean(
-  supabaseUrl && 
-  supabaseKey && 
-  !supabaseUrl.includes("your-project-id") && 
-  !supabaseKey.includes("your_supabase")
-);
-
-export const supabase = hasSupabase
-  ? createClient(supabaseUrl!, supabaseKey!)
-  : null;
+  if (
+    !url ||
+    !key ||
+    url.includes("your-project-id") ||
+    key.includes("your_supabase")
+  ) {
+    return null;
+  }
+  try {
+    return createClient(url, key, { auth: { persistSession: false } });
+  } catch (e) {
+    console.warn("Gagal inisialisasi Supabase client:", e);
+    return null;
+  }
+};
 
 class LocalDatabase {
   private questionsMap: Record<string, Question[]> = {};
@@ -111,9 +120,10 @@ class LocalDatabase {
 
   async getQuestions(kategori?: string): Promise<Question[]> {
     const targetCat = kategori || this.activeCategory;
-    if (supabase) {
+    const client = getSupabase();
+    if (client) {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await client
           .from("exam_questions")
           .select("*")
           .eq("category_id", targetCat)
@@ -163,7 +173,8 @@ class LocalDatabase {
 
     this.rebuildAnswerKeys();
 
-    if (supabase) {
+    const client = getSupabase();
+    if (client) {
       const rows = newQuestions.map((q, idx) => ({
         category_id: kategori,
         question_number: q.id || idx + 1,
@@ -172,7 +183,7 @@ class LocalDatabase {
         answer_key: q.answerKey || "A",
       }));
 
-      const { error } = await supabase
+      const { error } = await client
         .from("exam_questions")
         .upsert(rows, { onConflict: "category_id,question_number" });
 
@@ -183,7 +194,8 @@ class LocalDatabase {
   async saveResults(newResults: ExamResult[]): Promise<void> {
     this.results = [...this.results, ...newResults];
 
-    if (supabase) {
+    const client = getSupabase();
+    if (client) {
       const rows = newResults.map((r) => ({
         nim: r.nim,
         nama: r.nama,
@@ -199,7 +211,7 @@ class LocalDatabase {
         submitted_at: r.submittedAt || new Date().toISOString(),
       }));
 
-      const { error } = await supabase
+      const { error } = await client
         .from("exam_results")
         .upsert(rows, { onConflict: "nim,kategori" });
 
@@ -210,9 +222,10 @@ class LocalDatabase {
   }
 
   async getResults(kategoriFilter?: string): Promise<ExamResult[]> {
-    if (supabase) {
+    const client = getSupabase();
+    if (client) {
       try {
-        let query = supabase.from("exam_results").select("*");
+        let query = client.from("exam_results").select("*");
         if (kategoriFilter && kategoriFilter !== "all") {
           query = query.eq("kategori", kategoriFilter);
         }
@@ -234,6 +247,8 @@ class LocalDatabase {
           }));
           this.results = dbResults;
           return dbResults;
+        } else if (error) {
+          console.warn("Supabase fetch results error:", error);
         }
       } catch (e) {
         console.warn("Gagal fetch results dari Supabase:", e);
@@ -247,15 +262,16 @@ class LocalDatabase {
   }
 
   async clearResults(kategoriFilter?: string): Promise<void> {
+    const client = getSupabase();
     if (!kategoriFilter || kategoriFilter === "all") {
       this.results = [];
-      if (supabase) {
-        await supabase.from("exam_results").delete().neq("id", 0);
+      if (client) {
+        await client.from("exam_results").delete().neq("id", 0);
       }
     } else {
       this.results = this.results.filter((r) => r.kategori !== kategoriFilter);
-      if (supabase) {
-        await supabase.from("exam_results").delete().eq("kategori", kategoriFilter);
+      if (client) {
+        await client.from("exam_results").delete().eq("kategori", kategoriFilter);
       }
     }
   }
