@@ -40,8 +40,9 @@ export async function POST(req: NextRequest) {
       const catObj = EXAM_CATEGORIES.find((c) => c.id === itemCategory);
       const kategoriName = payload.kategoriName || (catObj ? catObj.name : itemCategory);
 
-      const answerKeys = localDb.getAnswerKeys(itemCategory);
-      const totalQuestionsCount = localDb.getQuestions(itemCategory).length;
+      const answerKeys = await localDb.getAnswerKeys(itemCategory);
+      const questions = await localDb.getQuestions(itemCategory);
+      const totalQuestionsCount = questions.length;
 
       // Calculate score
       let score = 0;
@@ -77,10 +78,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (newResults.length > 0) {
-      localDb.saveResults(newResults);
+      await localDb.saveResults(newResults);
     }
 
-    const currentResults = localDb.getResults();
+    const currentResults = await localDb.getResults();
 
     return NextResponse.json({
       success: true,

@@ -80,7 +80,6 @@ class LocalDatabase {
     ];
 
     this.rebuildAnswerKeys();
-    this.syncFromSupabase();
   }
 
   private rebuildAnswerKeys() {
@@ -90,64 +89,6 @@ class LocalDatabase {
         if (q.answerKey) this.answerKeysMap[cat][q.id.toString()] = q.answerKey;
       });
     });
-  }
-
-  // Load existing questions and results from Supabase PostgreSQL if connected
-  async syncFromSupabase() {
-    if (!supabase) return;
-    try {
-      // 1. Fetch questions from Supabase
-      const { data: dbQuestions, error: qErr } = await supabase
-        .from("exam_questions")
-        .select("*");
-
-      if (!qErr && dbQuestions && dbQuestions.length > 0) {
-        const newMap: Record<string, Question[]> = { afkar: [], quran: [] };
-        dbQuestions.forEach((row: any) => {
-          const cat = row.category_id || "afkar";
-          if (!newMap[cat]) newMap[cat] = [];
-          newMap[cat].push({
-            id: row.question_number,
-            question: row.question_text,
-            options: row.options,
-            answerKey: row.answer_key,
-            kategori: cat,
-          });
-        });
-
-        Object.keys(newMap).forEach((cat) => {
-          if (newMap[cat].length > 0) {
-            newMap[cat].sort((a, b) => a.id - b.id);
-            this.questionsMap[cat] = newMap[cat];
-          }
-        });
-        this.rebuildAnswerKeys();
-      }
-
-      // 2. Fetch results from Supabase
-      const { data: dbResults, error: rErr } = await supabase
-        .from("exam_results")
-        .select("*");
-
-      if (!rErr && dbResults && dbResults.length > 0) {
-        this.results = dbResults.map((row: any) => ({
-          nim: row.nim,
-          nama: row.nama,
-          mabna: row.mabna,
-          kategori: row.kategori,
-          kategoriName: row.kategori_name,
-          score: row.score,
-          totalQuestions: row.total_questions,
-          percentage: row.percentage,
-          tabSwitches: row.tab_switches || 0,
-          durationSeconds: row.duration_seconds || 0,
-          submittedAt: row.submitted_at,
-          answers: row.answers || {},
-        }));
-      }
-    } catch (e) {
-      console.warn("Supabase sync warning:", e);
-    }
   }
 
   getExamToken(): string {
@@ -168,14 +109,37 @@ class LocalDatabase {
     this.activeCategory = kategori;
   }
 
-  getQuestions(kategori?: string): Question[] {
+  async getQuestions(kategori?: string): Promise<Question[]> {
     const targetCat = kategori || this.activeCategory;
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from("exam_questions")
+          .select("*")
+          .eq("category_id", targetCat)
+          .order("question_number", { ascending: true });
+
+        if (!error && data && data.length > 0) {
+          const qList = data.map((row: any) => ({
+            id: row.question_number,
+            question: row.question_text,
+            options: row.options,
+            answerKey: row.answer_key,
+            kategori: targetCat,
+          }));
+          this.questionsMap[targetCat] = qList;
+          this.rebuildAnswerKeys();
+          return qList;
+        }
+      } catch (e) {
+        console.warn("Gagal fetch questions dari Supabase:", e);
+      }
+    }
     return this.questionsMap[targetCat] || [];
   }
 
-  getPublicQuestions(kategori?: string): Question[] {
-    const targetCat = kategori || this.activeCategory;
-    const questions = this.questionsMap[targetCat] || [];
+  async getPublicQuestions(kategori?: string): Promise<Question[]> {
+    const questions = await this.getQuestions(kategori);
     return questions.map((q) => ({
       id: q.id,
       question: q.question,
@@ -184,12 +148,13 @@ class LocalDatabase {
     }));
   }
 
-  getAnswerKeys(kategori?: string): Record<string, "A" | "B" | "C" | "D"> {
+  async getAnswerKeys(kategori?: string): Promise<Record<string, "A" | "B" | "C" | "D">> {
+    await this.getQuestions(kategori);
     const targetCat = kategori || this.activeCategory;
     return this.answerKeysMap[targetCat] || {};
   }
 
-  saveQuestions(kategori: string, newQuestions: Question[]) {
+  async saveQuestions(kategori: string, newQuestions: Question[]): Promise<void> {
     this.questionsMap[kategori] = newQuestions.map((q, idx) => ({
       ...q,
       id: q.id || idx + 1,
@@ -198,7 +163,6 @@ class LocalDatabase {
 
     this.rebuildAnswerKeys();
 
-    // Persist to Supabase if connected
     if (supabase) {
       const rows = newQuestions.map((q, idx) => ({
         category_id: kategori,
@@ -208,19 +172,17 @@ class LocalDatabase {
         answer_key: q.answerKey || "A",
       }));
 
-      supabase
+      const { error } = await supabase
         .from("exam_questions")
-        .upsert(rows, { onConflict: "category_id,question_number" })
-        .then(({ error }) => {
-          if (error) console.error("Gagal simpan soal ke Supabase:", error);
-        });
+        .upsert(rows, { onConflict: "category_id,question_number" });
+
+      if (error) console.error("Gagal simpan soal ke Supabase:", error);
     }
   }
 
-  saveResults(newResults: ExamResult[]) {
+  async saveResults(newResults: ExamResult[]): Promise<void> {
     this.results = [...this.results, ...newResults];
 
-    // Persist to Supabase if connected
     if (supabase) {
       const rows = newResults.map((r) => ({
         nim: r.nim,
@@ -237,35 +199,73 @@ class LocalDatabase {
         submitted_at: r.submittedAt || new Date().toISOString(),
       }));
 
-      supabase
+      const { error } = await supabase
         .from("exam_results")
-        .upsert(rows, { onConflict: "nim,kategori" })
-        .then(({ error }) => {
-          if (error) console.error("Gagal simpan hasil ke Supabase:", error);
-        });
+        .upsert(rows, { onConflict: "nim,kategori" });
+
+      if (error) {
+        console.error("Gagal simpan hasil ke Supabase:", error);
+      }
     }
   }
 
-  getResults(kategoriFilter?: string): ExamResult[] {
+  async getResults(kategoriFilter?: string): Promise<ExamResult[]> {
+    if (supabase) {
+      try {
+        let query = supabase.from("exam_results").select("*");
+        if (kategoriFilter && kategoriFilter !== "all") {
+          query = query.eq("kategori", kategoriFilter);
+        }
+        const { data, error } = await query;
+        if (!error && data) {
+          const dbResults = data.map((row: any) => ({
+            nim: row.nim,
+            nama: row.nama,
+            mabna: row.mabna,
+            kategori: row.kategori,
+            kategoriName: row.kategori_name,
+            score: row.score,
+            totalQuestions: row.total_questions,
+            percentage: row.percentage,
+            tabSwitches: row.tab_switches || 0,
+            durationSeconds: row.duration_seconds || 0,
+            submittedAt: row.submitted_at,
+            answers: row.answers || {},
+          }));
+          this.results = dbResults;
+          return dbResults;
+        }
+      } catch (e) {
+        console.warn("Gagal fetch results dari Supabase:", e);
+      }
+    }
+
     if (!kategoriFilter || kategoriFilter === "all") {
       return this.results;
     }
     return this.results.filter((r) => r.kategori === kategoriFilter);
   }
 
-  clearResults(kategoriFilter?: string) {
+  async clearResults(kategoriFilter?: string): Promise<void> {
     if (!kategoriFilter || kategoriFilter === "all") {
       this.results = [];
+      if (supabase) {
+        await supabase.from("exam_results").delete().neq("id", 0);
+      }
     } else {
       this.results = this.results.filter((r) => r.kategori !== kategoriFilter);
+      if (supabase) {
+        await supabase.from("exam_results").delete().eq("kategori", kategoriFilter);
+      }
     }
   }
 
-  getTotalQuestionsCountMap(): Record<string, number> {
+  async getTotalQuestionsCountMap(): Promise<Record<string, number>> {
     const map: Record<string, number> = {};
-    EXAM_CATEGORIES.forEach((c) => {
-      map[c.id] = (this.questionsMap[c.id] || []).length;
-    });
+    for (const c of EXAM_CATEGORIES) {
+      const qs = await this.getQuestions(c.id);
+      map[c.id] = qs.length;
+    }
     return map;
   }
 }

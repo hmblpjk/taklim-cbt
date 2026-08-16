@@ -33,16 +33,15 @@ export async function POST(req: NextRequest) {
       await redis.del("submitted_nims_afkar");
       await redis.del("submitted_nims_quran");
       await redis.del("exam_submission_queue");
-      localDb.clearResults("all");
-      if (supabase) {
-        await supabase.from("exam_results").delete().neq("id", 0);
-      }
+      await localDb.clearResults("all");
     }
 
     const queueLength = await redis.llen("exam_submission_queue");
-    const results = localDb.getResults();
+    const results = await localDb.getResults();
     const activeCategory = localDb.getActiveCategory();
     const examToken = localDb.getExamToken();
+    const questionsAfkar = await localDb.getQuestions("afkar");
+    const questionsQuran = await localDb.getQuestions("quran");
 
     return NextResponse.json({
       success: true,
@@ -52,8 +51,8 @@ export async function POST(req: NextRequest) {
       examToken,
       examStatus: activeCategory !== "none" ? "PUBLISHED" : "CLOSED",
       results,
-      questionsAfkar: localDb.getQuestions("afkar"),
-      questionsQuran: localDb.getQuestions("quran"),
+      questionsAfkar,
+      questionsQuran,
       message: clearTestData ? "Berhasil mengosongkan data simulasi test & reset anti double-submit!" : undefined,
     });
   } catch (error: any) {

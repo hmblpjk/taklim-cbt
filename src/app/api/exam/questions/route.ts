@@ -14,7 +14,7 @@ export async function GET() {
       );
     }
 
-    const publicQuestions = localDb.getPublicQuestions(activeCategory);
+    const publicQuestions = await localDb.getPublicQuestions(activeCategory);
     const catObj = EXAM_CATEGORIES.find((c) => c.id === activeCategory);
 
     const response = NextResponse.json({

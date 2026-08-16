@@ -18,8 +18,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const results = localDb.getResults(kategori);
-    const totalQMap = localDb.getTotalQuestionsCountMap();
+    const results = await localDb.getResults(kategori);
+    const totalQMap = await localDb.getTotalQuestionsCountMap();
 
     const excelBlob = exportResultsToExcel(results, totalQMap, kategori);
     const buffer = Buffer.from(await excelBlob.arrayBuffer());

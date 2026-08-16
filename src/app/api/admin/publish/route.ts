@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Save questions for specific category
-    localDb.saveQuestions(targetCategory, questions as Question[]);
+    await localDb.saveQuestions(targetCategory, questions as Question[]);
 
     if (setActive) {
       localDb.setActiveCategory(targetCategory);
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       activeCategory: localDb.getActiveCategory(),
-      message: `Berhasil mempublikasikan ${questions.length} soal ${catName} ke Edge CDN!`,
+      message: `Berhasil mempublikasikan ${questions.length} soal ${catName} ke Supabase & Edge CDN!`,
     });
   } catch (error: any) {
     return NextResponse.json(
