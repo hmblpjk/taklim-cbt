@@ -24,25 +24,38 @@ export async function POST(req: NextRequest) {
     let processedCount = 0;
     const newResults: ExamResult[] = [];
 
-    // Drain queue items
+    // Drain queue items from Upstash Redis
     while (true) {
-      const itemStr = await redis.rpop("exam_submission_queue");
-      if (!itemStr) break;
+      const itemRaw = await redis.rpop("exam_submission_queue");
+      if (!itemRaw) break;
 
       let payload: SubmissionPayload;
-      try {
-        payload = JSON.parse(itemStr);
-      } catch (e) {
-        continue;
+      if (typeof itemRaw === "string") {
+        try {
+          payload = JSON.parse(itemRaw);
+        } catch (e) {
+          payload = itemRaw as any;
+        }
+      } else {
+        payload = itemRaw as SubmissionPayload;
       }
+
+      if (!payload || !payload.nim) continue;
 
       const itemCategory = payload.kategori || "afkar";
       const catObj = EXAM_CATEGORIES.find((c) => c.id === itemCategory);
       const kategoriName = payload.kategoriName || (catObj ? catObj.name : itemCategory);
 
-      const answerKeys = await localDb.getAnswerKeys(itemCategory);
-      const questions = await localDb.getQuestions(itemCategory);
-      const totalQuestionsCount = questions.length;
+      let answerKeys = await localDb.getAnswerKeys(itemCategory);
+      let questions = await localDb.getQuestions(itemCategory);
+      
+      // Fallback if questions are empty in cold start
+      if (questions.length === 0) {
+        questions = localDb.getQuestions(itemCategory);
+        answerKeys = localDb.getAnswerKeys(itemCategory);
+      }
+
+      const totalQuestionsCount = questions.length || 2;
 
       // Calculate score
       let score = 0;
@@ -50,7 +63,7 @@ export async function POST(req: NextRequest) {
 
       Object.entries(answerKeys).forEach(([qId, correctKey]) => {
         const candidateChoice = candidateAnswers[qId];
-        if (candidateChoice && candidateChoice.toUpperCase() === correctKey.toUpperCase()) {
+        if (candidateChoice && candidateChoice.toString().toUpperCase() === correctKey.toString().toUpperCase()) {
           score += 1;
         }
       });

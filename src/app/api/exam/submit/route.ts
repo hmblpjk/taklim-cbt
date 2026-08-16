@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
-import { SubmissionPayload, EXAM_CATEGORIES } from "@/lib/constants";
+import { SubmissionPayload, ExamResult, EXAM_CATEGORIES } from "@/lib/constants";
 import { localDb } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4. Ingestion to Redis Queue
+    // 4. Ingestion to Redis Queue & Mark Set
     const payload: SubmissionPayload = {
       nama: nama.trim(),
       nim: cleanNim,
@@ -68,6 +68,45 @@ export async function POST(req: NextRequest) {
 
     await redis.lpush("exam_submission_queue", JSON.stringify(payload));
     await redis.sadd(redisSetKey, cleanNim);
+
+    // 5. Instantly calculate score and save to Supabase Database
+    try {
+      const answerKeys = await localDb.getAnswerKeys(activeCat);
+      const questions = await localDb.getQuestions(activeCat);
+      const totalQuestionsCount = questions.length || 2;
+
+      let score = 0;
+      const candidateAnswers = answers || {};
+      Object.entries(answerKeys).forEach(([qId, correctKey]) => {
+        const candidateChoice = candidateAnswers[qId];
+        if (candidateChoice && candidateChoice.toString().toUpperCase() === correctKey.toString().toUpperCase()) {
+          score += 1;
+        }
+      });
+
+      const percentage = totalQuestionsCount > 0
+        ? Math.round((score / totalQuestionsCount) * 100)
+        : 0;
+
+      const result: ExamResult = {
+        nim: cleanNim,
+        nama: nama.trim(),
+        mabna: mabna.trim(),
+        kategori: activeCat,
+        kategoriName,
+        score,
+        totalQuestions: totalQuestionsCount,
+        percentage,
+        tabSwitches: Number(tabSwitches) || 0,
+        durationSeconds: Number(durationSeconds) || 0,
+        submittedAt: payload.submittedAt,
+        answers: candidateAnswers,
+      };
+
+      await localDb.saveResults([result]);
+    } catch (saveErr) {
+      console.warn("Direct Supabase save warning:", saveErr);
+    }
 
     const executionMs = Date.now() - startTime;
 
