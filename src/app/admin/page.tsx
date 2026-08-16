@@ -294,6 +294,32 @@ export default function AdminPage() {
     }
   };
 
+  // Clear Test Data Action
+  const handleClearTestData = async () => {
+    if (!confirm("Apakah Anda yakin ingin mengosongkan data simulasi test & unblock seluruh NIM agar bisa login kembali?")) return;
+    setLoading(true);
+    setStatusMessage("");
+    try {
+      const res = await fetch("/api/admin/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, clearTestData: true }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setStatusMessage(data.message || "Berhasil mengosongkan data simulasi!");
+        setResults([]);
+        setQueueLength(0);
+      } else {
+        alert(data.message || "Gagal mengosongkan data.");
+      }
+    } catch (e) {
+      alert("Gagal mengosongkan data simulasi.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Export Excel
   const handleExportExcel = (kategoriTarget = resultsCategoryFilter) => {
     window.open(
@@ -655,6 +681,15 @@ export default function AdminPage() {
                 >
                   <Download className="w-4 h-4" />
                   <span>Ekspor Semua Rekap Nilai (Excel Multi-Sheet)</span>
+                </button>
+
+                <button
+                  onClick={handleClearTestData}
+                  disabled={loading}
+                  className="px-5 py-3 rounded-xl text-xs font-bold bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 transition-colors flex items-center space-x-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Reset Data Simulasi & Unblock Seluruh NIM</span>
                 </button>
               </div>
             </div>

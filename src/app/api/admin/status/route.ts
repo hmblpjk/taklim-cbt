@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
-import { localDb } from "@/lib/supabase";
+import { localDb, supabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { password, setActiveCategory, setExamToken } = await req.json();
+    const { password, setActiveCategory, setExamToken, clearTestData } = await req.json();
     const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
 
     if (password !== adminPassword) {
@@ -28,6 +28,17 @@ export async function POST(req: NextRequest) {
       localDb.setExamToken(setExamToken);
     }
 
+    // Reset Test Data Action (Clear Redis Anti-Double Submit sets and empty Redis Queue)
+    if (clearTestData) {
+      await redis.del("submitted_nims_afkar");
+      await redis.del("submitted_nims_quran");
+      await redis.del("exam_submission_queue");
+      localDb.clearResults("all");
+      if (supabase) {
+        await supabase.from("exam_results").delete().neq("id", 0);
+      }
+    }
+
     const queueLength = await redis.llen("exam_submission_queue");
     const results = localDb.getResults();
     const activeCategory = localDb.getActiveCategory();
@@ -43,6 +54,7 @@ export async function POST(req: NextRequest) {
       results,
       questionsAfkar: localDb.getQuestions("afkar"),
       questionsQuran: localDb.getQuestions("quran"),
+      message: clearTestData ? "Berhasil mengosongkan data simulasi test & reset anti double-submit!" : undefined,
     });
   } catch (error: any) {
     return NextResponse.json(
