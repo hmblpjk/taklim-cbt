@@ -51,8 +51,8 @@ export async function POST(req: NextRequest) {
       
       // Fallback if questions are empty in cold start
       if (questions.length === 0) {
-        questions = localDb.getQuestions(itemCategory);
-        answerKeys = localDb.getAnswerKeys(itemCategory);
+        questions = await localDb.getQuestions(itemCategory);
+        answerKeys = await localDb.getAnswerKeys(itemCategory);
       }
 
       const totalQuestionsCount = questions.length || 2;
