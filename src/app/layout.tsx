@@ -4,6 +4,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Taklim CBT - MSAA UIN MALANG",
   description: "Sistem CBT Placement Test Serverless High-Concurrency Bebas Crash",
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+    apple: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
