@@ -1,14 +1,11 @@
 /**
- * TAKLIM CBT - SIMULATOR LOAD TEST 5.000 PESERTA
+ * TAKLIM CBT - SIMULATOR LOAD TEST PESERTA (ENHANCED METRICS)
  * 
  * Penggunaan:
  * node simulate.js [TARGET_URL] [JUMLAH_PESERTA] [TOKEN] [KATEGORI]
  * 
- * Contoh Target Lokal:
- * node simulate.js http://localhost:3000/api/exam/submit 1000 TAKLIM2026 afkar
- * 
- * Contoh Target Production (Vercel / Subdomain):
- * node simulate.js https://cbt.hmblpjk.my.id/api/exam/submit 5000 TAKLIM2026 afkar
+ * Contoh Target Production:
+ * node simulate.js https://cbt.hmblpjk.my.id/api/exam/submit 5000 JOSJIS quran
  */
 
 const http = require("http");
@@ -19,7 +16,7 @@ const totalParticipants = parseInt(process.argv[3] || "1000", 10);
 const examToken = process.argv[4] || "TAKLIM2026";
 const examCategory = process.argv[5] || "afkar";
 
-const BATCH_SIZE = 50; // Requests per concurrent batch
+const BATCH_SIZE = 50;
 
 const mabnaList = [
   "Al-Farabi", "Ibn Khaldun", "Al-Muhasibi", "Ibn Sina", "Ibn Rusyd",
@@ -104,7 +101,9 @@ async function run() {
 
   const startTime = Date.now();
   let successCount = 0;
-  let failedCount = 0;
+  let blockedCount = 0;
+  let invalidTokenCount = 0;
+  let otherErrorCount = 0;
   let totalLatency = 0;
 
   const totalBatches = Math.ceil(totalParticipants / BATCH_SIZE);
@@ -122,16 +121,20 @@ async function run() {
     const results = await Promise.all(promises);
 
     results.forEach((r) => {
-      if (r.success) {
+      if (r.status === 200) {
         successCount++;
+      } else if (r.status === 409) {
+        blockedCount++;
+      } else if (r.status === 401) {
+        invalidTokenCount++;
       } else {
-        failedCount++;
+        otherErrorCount++;
       }
       totalLatency += r.latencyMs;
     });
 
     const progress = Math.round((endIdx / totalParticipants) * 100);
-    console.log(`⚡ Batch ${b + 1}/${totalBatches} (${startIdx}-${endIdx}) | Progress: ${progress}% | Sukses: ${successCount}`);
+    console.log(`⚡ Batch ${b + 1}/${totalBatches} (${startIdx}-${endIdx}) | Progress: ${progress}% | 200 OK: ${successCount} | 409 Blocked: ${blockedCount}`);
   }
 
   const totalTimeMs = Date.now() - startTime;
@@ -139,13 +142,16 @@ async function run() {
   const rps = Math.round((totalParticipants / totalTimeMs) * 1000);
 
   console.log("\n==========================================================");
-  console.log("📊 HASIL AKHIR SIMULASI LOAD TEST");
+  console.log("📊 HASIL DETAIL SIMULASI LOAD TEST");
   console.log("==========================================================");
-  console.log(`✅ Total Request Berhasil : ${successCount} (${((successCount / totalParticipants) * 100).toFixed(2)}%)`);
-  console.log(`❌ Total Request Gagal    : ${failedCount} (${((failedCount / totalParticipants) * 100).toFixed(2)}%)`);
-  console.log(`⏱️ Total Waktu Ingestion  : ${(totalTimeMs / 1000).toFixed(2)} Detik`);
-  console.log(`⚡ Rata-rata Latensi      : ${avgLatency} ms / request`);
-  console.log(`🔥 Ingestion Throughput   : ${rps} Request / Detik`);
+  console.log(`✅ HTTP 200 OK (Submit Baru Berhasil)     : ${successCount} (${((successCount / totalParticipants) * 100).toFixed(2)}%)`);
+  console.log(`🛡️ HTTP 409 Conflict (Sudah Pernah Submit) : ${blockedCount} (${((blockedCount / totalParticipants) * 100).toFixed(2)}%)`);
+  console.log(`🔑 HTTP 401 Unauthorized (Token Salah)     : ${invalidTokenCount} (${((invalidTokenCount / totalParticipants) * 100).toFixed(2)}%)`);
+  console.log(`❌ HTTP Error Lainnya                     : ${otherErrorCount} (${((otherErrorCount / totalParticipants) * 100).toFixed(2)}%)`);
+  console.log("----------------------------------------------------------");
+  console.log(`⏱️ Total Waktu Ingestion                  : ${(totalTimeMs / 1000).toFixed(2)} Detik`);
+  console.log(`⚡ Rata-rata Latensi                      : ${avgLatency} ms / request`);
+  console.log(`🔥 Throughput Ingestion                   : ${rps} Request / Detik`);
   console.log("==========================================================");
 }
 
