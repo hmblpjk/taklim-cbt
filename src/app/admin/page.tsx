@@ -393,7 +393,7 @@ export default function AdminPage() {
 
             <div className="pt-2 text-center">
               <p className="text-[11px] text-white/70 font-medium tracking-wide">
-                Taklim CBT MSAA &copy; 2026
+                Taklim CBT MSAA &copy; 2026 | Abyan
               </p>
             </div>
           </div>
