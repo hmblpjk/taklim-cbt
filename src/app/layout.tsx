@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Taklim CBT - MSAA UIN MALANG",
-  description: "Sistem CBT Placement Test Serverless High-Concurrency Bebas Crash",
+  description: "Sistem CBT Placement Test",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
